@@ -615,15 +615,14 @@ RWTexture2D<float> RWOutputLuminance;
 [numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
 void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID)
 {
-	float4 SvPosition = float4((float2)DispatchThreadId + Output_ViewportMin + 0.5f, 0.0f, 1.0f);
-	float2 UVScreen = SvPosition.xy * Output_ExtentInverse;
+	float4 SvPosition = float4((float2)DispatchThreadId + 0.5f + Output_ViewportMin, 0.0f, 1.0f);
+	float2 UV = ((float2)DispatchThreadId + 0.5f) * Output_ViewportSizeInverse;
 
-	if (IsComputeUVOutOfBounds(UVScreen))
+	if (IsComputeUVOutOfBounds(UV))
 	{
 		return;
 	}
 
-	float2 UV = ((float2)DispatchThreadId + 0.5f) * Output_ExtentInverse;
 	float4 InScreenPos = float4(UV * float2(2, -2) - float2(1, -1), 0, 1);
 
 	float2 Vignette;
@@ -677,11 +676,10 @@ half4 FetchAndResolveSceneColor(float2 UV, float ArrayIndex)
 void MobileCustomResolve_MainPS(
 	in float4 SvPosition							: SV_POSITION, 
 	in noperspective float2 UV						: TEXCOORD0,
-#if MOBILE_MULTI_VIEW_FALLBACK
-	in nointerpolation uint EyeIndex				: TEXCOORD1,
-#endif
 	out				 float4 OutColor				: SV_Target0
-#if USE_MULTI_VIEW_ID_SV
+#if MOBILE_MULTI_VIEW_FALLBACK
+	, in nointerpolation uint EyeIndex				: VIEW_ID
+#elif USE_MULTI_VIEW_ID_SV
 	, in nointerpolation uint MultiViewId : SV_ViewID
 #endif
 )
@@ -709,5 +707,3 @@ void MobileCustomResolve_MainPS(
 	OutColor.rgb = DeviceColor;
 	OutColor.a = 1.0;
 }
-
-
