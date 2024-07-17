@@ -1184,6 +1184,14 @@ float3 VertexFactoryGetWorldNormal(FVertexFactoryInput Input, FVertexFactoryInte
 float4 VertexFactoryGetPreviousWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
 {
 	FDFMatrix PreviousLocalToWorld = GetInstanceData(Intermediates).PrevLocalToWorld;
+	
+// AppSpaceWarp
+#if defined(IS_VELOCITY_SHADER) && SUPPORT_VR_FRAME_EXTRAPOLATION
+	FLWCMatrix CurrentLocalToWorld = GetPrimitiveData(Intermediates).LocalToWorld;
+	if (!IsSmoothRotation(PreviousLocalToWorld.M._11_21_31, PreviousLocalToWorld.M._12_22_32, CurrentLocalToWorld.M._11_21_31, CurrentLocalToWorld.M._12_22_32))
+		PreviousLocalToWorld = CurrentLocalToWorld;
+#endif
+	
 	float4 PrevLocalPosition = Input.Position;
 
 #if SUPPORT_GPUSKIN_PASSTHROUGH

@@ -38,13 +38,14 @@ void FinalizeViewState(inout ViewState InOutView)
 #endif
 }
 
-#define PrimaryView GetPrimaryView()
+#define PrimaryView ResolveView()
 
-static ViewState ResolvedView = (ViewState)0.0f;
+static ViewState ResolvedView;
 
 ViewState ResolveView()
 {
-	return GetPrimaryView();
+	static ViewState StaticView = GetPrimaryView();
+	return StaticView;
 }
 
 #if (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
@@ -87,3 +88,4 @@ uint GetInstanceId(uint InstanceId)
 }
 
 #define USE_MULTI_VIEW_ID_SV (MOBILE_MULTI_VIEW && (COMPILER_VULKAN && !INSTANCED_STEREO))
+#define USE_MULTI_VIEW_ID_INTERPOLANT (MOBILE_MULTI_VIEW && !(COMPILER_VULKAN && !INSTANCED_STEREO))

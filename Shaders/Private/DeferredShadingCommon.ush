@@ -798,7 +798,9 @@ void MobileFetchGBuffer(in float2 UV, out half4 GBufferA, out half4 GBufferB, ou
 }
 #endif //MOBILE_DEFERRED_SHADING
 
-FGBufferData MobileFetchAndDecodeGBuffer(in float2 UV, in float2 PixelPos)
+// BEGIN META SECTION - Multi-View CustomDepth support
+FGBufferData MobileFetchAndDecodeGBuffer(in float2 UV, in float2 PixelPos, uint ViewId)
+// END META SECTION - Multi-View CustomDepth support
 {
 	FGBufferData GBuffer = (FGBufferData)0;
 #if (MOBILE_DEFERRED_SHADING && IS_MOBILE_DEFERREDSHADING_SUBPASS && PIXELSHADER)
@@ -814,7 +816,9 @@ FGBufferData MobileFetchAndDecodeGBuffer(in float2 UV, in float2 PixelPos)
 	GBuffer.Depth = CalcSceneDepth(UV);
 #endif
 
-	GBuffer.CustomDepth = ConvertFromDeviceZ(Texture2DSample(MobileSceneTextures.CustomDepthTexture, MobileSceneTextures.CustomDepthTextureSampler, UV).r);
+	// BEGIN META SECTION - Multi-View CustomDepth support
+	GBuffer.CustomDepth = ConvertFromDeviceZ(Texture2DArraySample(MobileSceneTextures.CustomDepthTexture, MobileSceneTextures.CustomDepthTextureSampler, float3(UV, ViewId)).r);
+	// END META SECTION - Multi-View CustomDepth support
 	GBuffer.CustomStencil = MobileSceneTextures.CustomStencilTexture.Load(int3(PixelPos.xy, 0)) STENCIL_COMPONENT_SWIZZLE;
 
 	return GBuffer;

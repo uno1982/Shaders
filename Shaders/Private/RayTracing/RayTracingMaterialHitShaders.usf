@@ -486,6 +486,7 @@ RAY_TRACING_ENTRY_CLOSEST_HIT(MaterialCHS,
 	FPackedMaterialClosestHitPayload, PackedPayload,
 	FRayTracingIntersectionAttributes, Attributes)
 {
+	ResolvedView = ResolveView();
 	PackedPayload.HitT = RayTCurrent();
 
 #if USE_MATERIAL_CLOSEST_HIT_SHADER

@@ -917,7 +917,7 @@ void IntegrateDOFPS_Mobile(
 	
 	half4 SceneColor = SampleSceneColor(TexCoords.xy,MultiViewId);
 	half4 DofFine = SampleSceneColor(FineDofGrain.xy,MultiViewId);
-	
+
 	half4 Dof = Texture2DSample(DofBlurTexture, DofBlurSampler, TexCoords.zw);
 	half DofCoc = Texture2DSample(SunShaftAndDofTexture, SunShaftAndDofSampler, TexCoords.xy).r;
 	// Convert alpha back into circle of confusion.

@@ -122,6 +122,12 @@
 // SUBSTRATE_TODO: Shared with BasePassPixelShader.usf
 #define MATERIAL_SUBSTRATE_OPAQUE_PRECOMPUTED_LIGHTING 0
 
+// BEGIN META SECTION - XR Soft Occlusions
+#if ENABLE_SOFT_OCCLUSIONS
+	#include "EnvironmentDepthOcclusion.ush"
+#endif
+// END META SECTION - XR Soft Occlusions
+
 #if SUBSTRATE_TRANSLUCENT_FORWARD || SUBSTRATE_FORWARD_SHADING || MATERIAL_SUBSTRATE_OPAQUE_PRECOMPUTED_LIGHTING || SUBSTRATE_MATERIAL_EXPORT_EXECUTED
 #include "/Engine/Private/Substrate/SubstrateEvaluation.ush"
 #endif
@@ -292,6 +298,9 @@ void Main(
 	FVertexFactoryInterpolantsVSToPS Interpolants
 	, FMobileBasePassInterpolantsVSToPS BasePassInterpolants
 	, in float4 SvPosition : SV_Position
+#if USE_MULTI_VIEW_ID_SV
+	, in uint MultiViewId : SV_ViewID
+#endif
 	OPTIONAL_IsFrontFace
 #if MOBILE_USE_GBUBUFFER
 	#if USE_GLES_FBF_DEFERRED
@@ -338,8 +347,10 @@ void Main(
 	half4 OutColor1;
 #endif
 
-#if MOBILE_MULTI_VIEW
+#if USE_MULTI_VIEW_ID_INTERPOLANT
 	ResolvedView = ResolveView(BasePassInterpolants.MultiViewId);
+#elif USE_MULTI_VIEW_ID_SV
+	ResolvedView = ResolveView(MultiViewId);
 #else
 	ResolvedView = ResolveView();
 #endif
@@ -356,6 +367,15 @@ void Main(
 	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants, SvPosition);
 	FPixelMaterialInputs PixelMaterialInputs;
 	{
+// BEGIN META SECTION - XR Soft Occlusions
+#if USE_MULTI_VIEW_ID_SV
+		MaterialParameters.ViewId = MultiViewId;
+#elif USE_MULTI_VIEW_ID_INTERPOLANT
+		MaterialParameters.ViewId = BasePassInterpolants.MultiViewId;
+#else
+		MaterialParameters.ViewId = 0;
+#endif
+// END META SECTION - XR Soft Occlusions
 		float4 ScreenPosition = SvPositionToResolvedScreenPosition(SvPosition);
 		float3 WorldPosition = BasePassInterpolants.PixelPosition.xyz;
 		float3 WorldPositionExcludingWPO = BasePassInterpolants.PixelPosition.xyz;
@@ -936,7 +956,7 @@ void Main(
 	}
 #elif  (!MATERIAL_SHADINGMODEL_SINGLELAYERWATER && ENABLE_CLUSTERED_LIGHTS)
 	{
-#if MOBILE_MULTI_VIEW
+#if USE_MULTI_VIEW_ID_INTERPOLANT
 		const uint EyeIndex = BasePassInterpolants.MultiViewId;
 #else
 		const uint EyeIndex = 0;
@@ -1091,6 +1111,18 @@ void Main(
 	// clamp lit color to avoid overflows
 	OutColor.rgb = SafeGetOutColor(OutColor.rgb);
 #endif
+
+// BEGIN META SECTION - XR Soft Occlusions
+#if ENABLE_SOFT_OCCLUSIONS
+	uint ViewId = 0;
+#if USE_MULTI_VIEW_ID_SV
+	ViewId = MultiViewId;
+#elif USE_MULTI_VIEW_ID_INTERPOLANT
+	ViewId = BasePassInterpolants.MultiViewId;
+#endif
+	OutColor = EnvironmentDepthOcclusion(OutColor, float4(MaterialParameters.WorldPosition_CamRelative, 1.0f), ViewId);
+#endif
+// END META SECTION - XR Soft Occlusions
 
 #if USE_EDITOR_COMPOSITING && (MOBILE_EMULATION)
 	// Editor primitive depth testing

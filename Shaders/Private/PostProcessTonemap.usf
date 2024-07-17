@@ -706,6 +706,12 @@ void MobileCustomResolve_MainPS(
 	LinearColor *= ColorScale0.rgb; // SceneColorTint
 	half3 DeviceColor = ColorLookupTable(LinearColor);
 
+	// BEGIN META SECTION - LDR Tonemap Subpass
+	#if !MOBILE_HDR
+		DeviceColor = sRGBToLinear(DeviceColor);
+	#endif
+	// END META SECTION - LDR Tonemap Subpass
+
 	OutColor.rgb = DeviceColor;
 	OutColor.a = 1.0;
 }
