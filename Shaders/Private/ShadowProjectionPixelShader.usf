@@ -430,7 +430,7 @@ float2 PointLightProjParameters;
 
 /** Pixel shader for projecting a one pass point light shadow from a cube map. */
 void MainOnePassPointLightPS(
-#if INSTANCED_STEREO
+#if INSTANCED_STEREO && MOBILE_MULTI_VIEW
 	in nointerpolation uint EyeIndex : TEXCOORD0,
 #endif
 	in float4 SVPos : SV_POSITION,
@@ -439,7 +439,7 @@ void MainOnePassPointLightPS(
 {
 	
 	float ArrayIndex = 0;
-#if INSTANCED_STEREO
+#if INSTANCED_STEREO && MOBILE_MULTI_VIEW
 	ResolvedView = ResolveView(EyeIndex);
 	ArrayIndex = EyeIndex;
 #else
