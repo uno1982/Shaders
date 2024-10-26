@@ -42,21 +42,9 @@ float3 CompositeReflectionCapturesAndSkylightTWS(
 #ifdef REFLECTION_COMPOSITE_NO_CULLING_DATA
 		CaptureIndex = TileCaptureIndex;	// Go from 0 to NumCapturesAffectingTile as absolute index in capture array
 #else
-	#if (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
-		BRANCH
-		if (EyeIndex == 0)
-		{
-	#endif
-	
-			CaptureIndex = GetCulledLightDataGrid(CaptureDataStartIndex + TileCaptureIndex);
-	
-	#if (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
-		}
-		else
-		{
-			CaptureIndex = GetCulledLightDataGridISR(CaptureDataStartIndex + TileCaptureIndex);
-		}
-	#endif
+		// BEGIN META SECTION - LightGrid Optimization
+		CaptureIndex = GetCulledLightDataGrid(CaptureDataStartIndex + TileCaptureIndex);
+		// END META SECTION - LightGrid Optimization
 #endif
 
 		FDFVector3 CaptureWorldPosition = MakeDFVector3(GetReflectionPositionAndRadius(CaptureIndex).xyz, GetReflectionPositionLow(CaptureIndex).xyz);

@@ -10,7 +10,9 @@ VirtualShadowMapLightGrid.ush:
 
 FCulledLightsGridData VirtualShadowMapGetLightsGrid(uint2 PixelPos, float SceneDepth)
 {
-	// Has no effect unless INSTANCED_STEREO is enabled. Used in GetLightGridData to select ForwardLightData or ForwardLightDataISR, but then only uses redundant parameters anyway.
+	// BEGIN META SECTION - LightGrid Optimization
+	// Has no effect unless INSTANCED_STEREO is enabled. Only uses redundant parameters anyway.
+	// END META SECTION - LightGrid Optimization
 	uint EyeIndex = 0U;
 
 	uint GridLinearIndex = ComputeLightGridCellIndex(PixelPos, SceneDepth, EyeIndex);

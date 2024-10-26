@@ -492,6 +492,10 @@ struct FMaterialPixelParameters
 	uint InstanceId;
 #endif
 
+// BEGIN META SECTION - XR Soft Occlusions
+	uint ViewId;
+// END META SECTION - XR Soft Occlusions
+
 #if USES_PER_INSTANCE_CUSTOM_DATA && VF_USE_PRIMITIVE_SCENE_DATA
 	uint CustomDataOffset;
 	uint CustomDataCount;
@@ -2849,7 +2853,10 @@ MaterialFloat4 MobileSceneTextureLookup(inout FMaterialPixelParameters Parameter
 	}
 #else
 	const float2 PixelPos = UV * View.BufferSizeAndInvSize.xy;
-	FGBufferData GBuffer = MobileFetchAndDecodeGBuffer(UV, PixelPos);
+	// BEGIN META SECTION - Multi-View CustomDepth support
+	const uint ViewId = Parameters.ViewId;
+	FGBufferData GBuffer = MobileFetchAndDecodeGBuffer(UV, PixelPos, ViewId);
+	// END META SECTION - Multi-View CustomDepth support
 
 	switch(SceneTextureId)
 	{
@@ -3438,6 +3445,18 @@ half GetMaterialAnisotropy(FPixelMaterialInputs PixelMaterialInputs)
 {
 	return clamp(GetMaterialAnisotropyRaw(PixelMaterialInputs), -1.0f, 1.0f);
 }
+
+// BEGIN META SECTION - XR Soft Occlusions
+uint GetViewId(FMaterialPixelParameters Parameters)
+{
+	return Parameters.ViewId;
+}
+
+half GetMaterialXRSoftOcclusionsDepthBias()
+{
+%{get_material_xr_soft_occlusions_depth_bias};
+}
+// END META SECTION - XR Soft Occlusions
 
 half GetMaterialTranslucencyDirectionalLightingIntensity()
 {

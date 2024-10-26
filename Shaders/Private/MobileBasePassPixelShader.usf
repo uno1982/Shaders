@@ -122,6 +122,12 @@
 // SUBSTRATE_TODO: Shared with BasePassPixelShader.usf
 #define MATERIAL_SUBSTRATE_OPAQUE_PRECOMPUTED_LIGHTING 0
 
+// BEGIN META SECTION - XR Soft Occlusions
+#if ENABLE_SOFT_OCCLUSIONS
+	#include "EnvironmentDepthOcclusion.ush"
+#endif
+// END META SECTION - XR Soft Occlusions
+
 #if SUBSTRATE_TRANSLUCENT_FORWARD || SUBSTRATE_FORWARD_SHADING || MATERIAL_SUBSTRATE_OPAQUE_PRECOMPUTED_LIGHTING || SUBSTRATE_MATERIAL_EXPORT_EXECUTED
 #include "/Engine/Private/Substrate/SubstrateEvaluation.ush"
 #endif
@@ -292,6 +298,9 @@ void Main(
 	FVertexFactoryInterpolantsVSToPS Interpolants
 	, FMobileBasePassInterpolantsVSToPS BasePassInterpolants
 	, in float4 SvPosition : SV_Position
+#if USE_MULTI_VIEW_ID_SV
+	, in uint MultiViewId : SV_ViewID
+#endif
 	OPTIONAL_IsFrontFace
 #if MOBILE_USE_GBUBUFFER
 	#if USE_GLES_FBF_DEFERRED
@@ -338,11 +347,18 @@ void Main(
 	half4 OutColor1;
 #endif
 
-#if MOBILE_MULTI_VIEW
+// BEGIN META SECTION - LightGrid Optimization
+#if USE_MULTI_VIEW_ID_INTERPOLANT
 	ResolvedView = ResolveView(BasePassInterpolants.MultiViewId);
+	const uint EyeIndex = BasePassInterpolants.MultiViewId;
+#elif USE_MULTI_VIEW_ID_SV
+	ResolvedView = ResolveView(MultiViewId);
+	const uint EyeIndex = MultiViewId;
 #else
 	ResolvedView = ResolveView();
+	const uint EyeIndex = 0;
 #endif
+// END META SECTION - LightGrid Optimization
 
 #if USE_GLOBAL_CLIP_PLANE && !PLATFORM_SUPPORTS_CLIP_DISTANCE
 	clip(BasePassInterpolants.OutClipDistance);
@@ -356,6 +372,15 @@ void Main(
 	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants, SvPosition);
 	FPixelMaterialInputs PixelMaterialInputs;
 	{
+// BEGIN META SECTION - XR Soft Occlusions
+#if USE_MULTI_VIEW_ID_SV
+		MaterialParameters.ViewId = MultiViewId;
+#elif USE_MULTI_VIEW_ID_INTERPOLANT
+		MaterialParameters.ViewId = BasePassInterpolants.MultiViewId;
+#else
+		MaterialParameters.ViewId = 0;
+#endif
+// END META SECTION - XR Soft Occlusions
 		float4 ScreenPosition = SvPositionToResolvedScreenPosition(SvPosition);
 		float3 WorldPosition = BasePassInterpolants.PixelPosition.xyz;
 		float3 WorldPositionExcludingWPO = BasePassInterpolants.PixelPosition.xyz;
@@ -855,7 +880,9 @@ void Main(
 #endif
 
 	float2 LocalPosition = SvPosition.xy - ResolvedView.ViewRectMin.xy;
-	uint GridIndex = ComputeLightGridCellIndex(uint2(LocalPosition.x, LocalPosition.y), SvPosition.w);
+	// BEGIN META SECTION - LightGrid Optimization
+	uint GridIndex = ComputeLightGridCellIndex(uint2(LocalPosition.x, LocalPosition.y), SvPosition.w, EyeIndex);
+	// END META SECTION - LightGrid Optimization
 
 #if MATERIALBLENDING_MASKED || MATERIALBLENDING_SOLID || TRANSLUCENCY_LIGHTING_SURFACE_FORWARDSHADING || TRANSLUCENCY_LIGHTING_SURFACE_LIGHTINGVOLUME || MATERIAL_SHADINGMODEL_SINGLELAYERWATER
 	// Reflection IBL
@@ -936,12 +963,6 @@ void Main(
 	}
 #elif  (!MATERIAL_SHADINGMODEL_SINGLELAYERWATER && ENABLE_CLUSTERED_LIGHTS)
 	{
-#if MOBILE_MULTI_VIEW
-		const uint EyeIndex = BasePassInterpolants.MultiViewId;
-#else
-		const uint EyeIndex = 0;
-#endif
-
 		const FCulledLightsGridData CulledLightGridData = GetCulledLightsGrid(GridIndex, EyeIndex);
 
 		half4 LocalLightDynamicShadowFactors = 1.0f;
@@ -967,7 +988,6 @@ void Main(
 		half3 V = MaterialParameters.CameraVector;
 		half NoV = saturate(abs(dot(N, V)) + 1e-5);
 		const float3 EnvBrdf = GetEnvBRDF(GBuffer.SpecularColor, GBuffer.Roughness, NoV);
-		const uint EyeIndex = 0;
 
 		const float4 NullDistortionParams = 1.0f;
 		WaterVolumeLightingOutput WaterLighting = EvaluateWaterVolumeLighting(
@@ -1091,6 +1111,18 @@ void Main(
 	// clamp lit color to avoid overflows
 	OutColor.rgb = SafeGetOutColor(OutColor.rgb);
 #endif
+
+// BEGIN META SECTION - XR Soft Occlusions
+#if ENABLE_SOFT_OCCLUSIONS
+	uint ViewId = 0;
+#if USE_MULTI_VIEW_ID_SV
+	ViewId = MultiViewId;
+#elif USE_MULTI_VIEW_ID_INTERPOLANT
+	ViewId = BasePassInterpolants.MultiViewId;
+#endif
+	OutColor = EnvironmentDepthOcclusion(OutColor, float4(MaterialParameters.WorldPosition_CamRelative, 1.0f), ViewId);
+#endif
+// END META SECTION - XR Soft Occlusions
 
 #if USE_EDITOR_COMPOSITING && (MOBILE_EMULATION)
 	// Editor primitive depth testing

@@ -17,13 +17,23 @@ void Main(
 #if INSTANCED_STEREO
 	, out uint ViewportIndex : SV_ViewPortArrayIndex
 #endif
+// BEGIN META SECTION - Multi-View CustomDepth support
+#if USE_MULTI_VIEW_ID_SV
+	, in uint ViewId : SV_ViewID
+#endif
+// END META SECTION - Multi-View CustomDepth support
 	)
 {
 #if INSTANCED_STEREO
 	const uint EyeIndex = GetEyeIndexFromVF(Input);
 	ViewportIndex = EyeIndex;
 #endif
+	// BEGIN META SECTION - Multi-View CustomDepth support
+#if USE_MULTI_VIEW_ID_SV
+	ResolvedView = ResolveView(ViewId);
+#else
 	ResolvedView = ResolveViewFromVF(Input);
+#endif
 
 	float4 WorldPos = VertexFactoryGetWorldPosition(Input);
 

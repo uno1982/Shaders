@@ -95,7 +95,9 @@ float GetContactShadowOcclusion(float2 HitUV)
 
 #if SHADING_PATH_MOBILE
 #	if MOBILE_DEFERRED_SHADING
-		FGBufferData SampleGBuffer = MobileFetchAndDecodeGBuffer(HitUV, HitPixelCoord);
+		// BEGIN META SECTION - Multi-View CustomDepth support
+		FGBufferData SampleGBuffer = MobileFetchAndDecodeGBuffer(HitUV, HitPixelCoord, 0);
+		// BEGIN META SECTION - Multi-View CustomDepth support
 		const bool bHitCastContactShadow = CastContactShadow(SampleGBuffer);
 #	else
 		uint Stencil = StencilTexture.Load(int3(HitPixelCoord, 0)) STENCIL_COMPONENT_SWIZZLE;

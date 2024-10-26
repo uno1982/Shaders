@@ -33,6 +33,9 @@ uint MaxCulledLightsPerCell;
 uint3 CulledGridSize;
 float3 LightGridZParams;
 uint LightGridPixelSizeShift;
+// BEGIN META SECTION - LightGrid Optimization
+uint ViewGridCellOffset;
+// END META SECTION - LightGrid Optimization
 
 #if ENABLE_LIGHT_CULLING_VIEW_SPACE_BUILD_DATA
 StructuredBuffer<float4> LightViewSpacePositionAndRadius;
@@ -180,7 +183,10 @@ void LightGridInjectionCS(
 
 	if (all(GridCoordinate < (uint3)CulledGridSize))
 	{
-		uint GridIndex = (GridCoordinate.z * CulledGridSize.y + GridCoordinate.y) * CulledGridSize.x + GridCoordinate.x;
+		// BEGIN META SECTION - LightGrid Optimization
+		uint LocalGridIndex = (GridCoordinate.z * CulledGridSize.y + GridCoordinate.y) * CulledGridSize.x + GridCoordinate.x;
+		uint GlobalGridIndex = LocalGridIndex + ViewGridCellOffset;
+		// END META SECTION - LightGrid Optimization
 
 // Disable to pass all lights through for debugging, will hit limits quickly though
 #define CULL_LIGHTS 1
@@ -237,23 +243,25 @@ void LightGridInjectionCS(
 					uint NextLink;
 					InterlockedAdd(RWNextCulledLightLink[0], 1U, NextLink);
 
+// BEGIN META SECTION - LightGrid Optimization
 					if (NextLink < NumAvailableLinks)
 					{
 						uint PreviousLink;
-						InterlockedExchange(RWStartOffsetGrid[GridIndex], NextLink, PreviousLink);
+						InterlockedExchange(RWStartOffsetGrid[LocalGridIndex], NextLink, PreviousLink);
 						RWCulledLightLinks[NextLink * LIGHT_LINK_STRIDE + 0] = LocalLightIndex;
 						RWCulledLightLinks[NextLink * LIGHT_LINK_STRIDE + 1] = PreviousLink;
 					}
 
 #else
 					uint CulledLightIndex;
-					InterlockedAdd(RWNumCulledLightsGrid[GridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 0], 1U, CulledLightIndex);
-					RWNumCulledLightsGrid[GridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = GridIndex * MaxCulledLightsPerCell;
+					InterlockedAdd(RWNumCulledLightsGrid[GlobalGridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 0], 1U, CulledLightIndex);
+					RWNumCulledLightsGrid[GlobalGridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = GlobalGridIndex * MaxCulledLightsPerCell;
 
 					if (CulledLightIndex < MaxCulledLightsPerCell)
 					{
-						RWCulledLightDataGrid[GridIndex * MaxCulledLightsPerCell + CulledLightIndex] = LocalLightIndex;
+						RWCulledLightDataGrid[GlobalGridIndex * MaxCulledLightsPerCell + CulledLightIndex] = LocalLightIndex;
 					}
+// END META SECTION - LightGrid Optimization
 #endif
 				}
 			}
@@ -275,22 +283,23 @@ void LightGridInjectionCS(
 					uint NextLink;
 					InterlockedAdd(RWNextCulledLightLink[0], 1U, NextLink);
 
+// BEGIN META SECTION - LightGrid Optimization
 					if (NextLink < NumAvailableLinks)
 					{
 						uint PreviousLink;
-						InterlockedExchange(RWStartOffsetGrid[NumGridCells + GridIndex], NextLink, PreviousLink);
+						InterlockedExchange(RWStartOffsetGrid[NumGridCells + LocalGridIndex], NextLink, PreviousLink);
 						RWCulledLightLinks[NextLink * LIGHT_LINK_STRIDE + 0] = ReflectionCaptureIndex;
 						RWCulledLightLinks[NextLink * LIGHT_LINK_STRIDE + 1] = PreviousLink;
 					}
 
 				#else
 					uint CulledCaptureIndex;
-					InterlockedAdd(RWNumCulledLightsGrid[(NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 0], 1U, CulledCaptureIndex);
-					RWNumCulledLightsGrid[(NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = (NumGridCells + GridIndex) * MaxCulledLightsPerCell;
+					InterlockedAdd(RWNumCulledLightsGrid[(NumGridCells + GlobalGridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 0], 1U, CulledCaptureIndex);
+					RWNumCulledLightsGrid[(NumGridCells + GlobalGridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = (NumGridCells + GlobalGridIndex) * MaxCulledLightsPerCell;
 
 					if (CulledCaptureIndex < MaxCulledLightsPerCell)
 					{
-						RWCulledLightDataGrid[(NumGridCells + GridIndex) * MaxCulledLightsPerCell + CulledCaptureIndex] = ReflectionCaptureIndex;
+						RWCulledLightDataGrid[(NumGridCells + GlobalGridIndex) * MaxCulledLightsPerCell + CulledCaptureIndex] = ReflectionCaptureIndex;
 					}
 				#endif
 			}
@@ -302,26 +311,27 @@ void LightGridInjectionCS(
 		{
 			if (LocalLightIndex < MaxCulledLightsPerCell)
 			{
-				RWCulledLightDataGrid[GridIndex * MaxCulledLightsPerCell + LocalLightIndex] = LocalLightIndex;
+				RWCulledLightDataGrid[GlobalGridIndex * MaxCulledLightsPerCell + LocalLightIndex] = LocalLightIndex;
 			}
 		}
 
-		RWNumCulledLightsGrid[GridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 0] = NumLocalLights;
-		RWNumCulledLightsGrid[GridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = GridIndex * MaxCulledLightsPerCell;
+		RWNumCulledLightsGrid[GlobalGridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 0] = NumLocalLights;
+		RWNumCulledLightsGrid[GlobalGridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = GlobalGridIndex * MaxCulledLightsPerCell;
 		
 		LOOP
 		for (uint ReflectionCaptureIndex = 0; ReflectionCaptureIndex < NumReflectionCaptures; ReflectionCaptureIndex++)
 		{
 			if (ReflectionCaptureIndex < MaxCulledLightsPerCell)
 			{
-				RWCulledLightDataGrid[(NumGridCells + GridIndex) * MaxCulledLightsPerCell + ReflectionCaptureIndex] = ReflectionCaptureIndex;
+				RWCulledLightDataGrid[(NumGridCells + GlobalGridIndex) * MaxCulledLightsPerCell + ReflectionCaptureIndex] = ReflectionCaptureIndex;
 			}
 		}
 
-		RWNumCulledLightsGrid[(NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 0] = NumReflectionCaptures;
-		RWNumCulledLightsGrid[(NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = (NumGridCells + GridIndex) * MaxCulledLightsPerCell;
+		RWNumCulledLightsGrid[(NumGridCells + GlobalGridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 0] = NumReflectionCaptures;
+		RWNumCulledLightsGrid[(NumGridCells + GlobalGridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = (NumGridCells + GlobalGridIndex) * MaxCulledLightsPerCell;
 #endif
 	}
+// END META SECTION - LightGrid Optimization
 }
 
 #endif // SHADER_LIGHT_GRID_INJECTION_CS
@@ -333,6 +343,9 @@ void LightGridInjectionCS(
 RWStructuredBuffer<uint> RWNextCulledLightData;
 StructuredBuffer<uint> StartOffsetGrid;
 StructuredBuffer<uint> CulledLightLinks;
+// BEGIN META SECTION - LightGrid Optimization
+uint ViewCulledDataOffset;
+// END META SECTION - LightGrid Optimization
 
 #if USE_LOCALSTORE_FOR_ATOMICS
 groupshared uint LDSNextCulledLightData;
@@ -340,16 +353,20 @@ groupshared uint LDSBaseStart;
 #endif
 
 
-void CompactReverseLinkedList(uint GridIndex, uint SceneMax, bool FirstThread, bool bThreadValid)
+// BEGIN META SECTION - LightGrid Optimization
+void CompactReverseLinkedList(uint LocalGridIndex, uint SceneMax, bool FirstThread, bool bThreadValid)
 {
 	uint NumCulledLights		= 0;
 	uint StartLinkOffset		= 0;
 	uint LinkOffset				= 0;
 	uint CulledLightDataStart	= 0;
 
+	const uint GlobalGridIndex = LocalGridIndex + ViewGridCellOffset;
+
 	if(bThreadValid)
 	{
-		StartLinkOffset = StartOffsetGrid[GridIndex];
+		StartLinkOffset = StartOffsetGrid[LocalGridIndex];
+// END META SECTION - LightGrid Optimization
 		LinkOffset = StartLinkOffset;
 
 		// Traverse the linked list to count how many culled indices we have
@@ -386,8 +403,11 @@ void CompactReverseLinkedList(uint GridIndex, uint SceneMax, bool FirstThread, b
 
 	if( bThreadValid)
 	{
-		RWNumCulledLightsGrid[GridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 0] = NumCulledLights;
-		RWNumCulledLightsGrid[GridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = CulledLightDataStart;
+		// BEGIN META SECTION - LightGrid Optimization
+		CulledLightDataStart += ViewCulledDataOffset;
+		RWNumCulledLightsGrid[GlobalGridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 0] = NumCulledLights;
+		RWNumCulledLightsGrid[GlobalGridIndex * NUM_CULLED_LIGHTS_GRID_STRIDE + 1] = CulledLightDataStart;
+		// END META SECTION - LightGrid Optimization
 	
 		LinkOffset = StartLinkOffset;
 		uint CulledLightIndex = 0;
@@ -415,13 +435,15 @@ void LightGridCompactCS(
 	bool bThreadValid = all(GridCoordinate < CulledGridSize);
 	bool bFirstThread =  GroupIndex==0;
 	
-	uint GridIndex = (GridCoordinate.z * CulledGridSize.y + GridCoordinate.y) * CulledGridSize.x + GridCoordinate.x;
+	// BEGIN META SECTION - LightGrid Optimization
+	uint LocalGridIndex = (GridCoordinate.z * CulledGridSize.y + GridCoordinate.y) * CulledGridSize.x + GridCoordinate.x;
 
 	// Compact lights
-	CompactReverseLinkedList(GridIndex, NumLocalLights, bFirstThread, bThreadValid);
+	CompactReverseLinkedList(LocalGridIndex, NumLocalLights, bFirstThread, bThreadValid);
 
 	// Compact reflection captures
-	CompactReverseLinkedList(NumGridCells + GridIndex, NumReflectionCaptures, bFirstThread, bThreadValid);
+	CompactReverseLinkedList(NumGridCells + LocalGridIndex, NumReflectionCaptures, bFirstThread, bThreadValid);
+	// END META SECTION - LightGrid Optimization
 }
 
 #endif // SHADER_LIGHT_GRID_COMPACT_CS

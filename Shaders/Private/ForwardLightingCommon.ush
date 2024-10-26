@@ -433,28 +433,16 @@ half3 GetImageBasedReflectionSpecular(FMaterialPixelParameters MaterialParameter
 		uint NumLocalReflectionCaptures = 0;
 		uint DataStartIndex = 0;
 
+// BEGIN META SECTION - LightGrid Optimization
 #if REFLECTION_COMPOSITE_USE_BLENDED_REFLECTION_CAPTURES
-		#if (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
-			BRANCH
-			if (EyeIndex == 0)
-			{
-		#endif
-
-				uint NumCulledEntryIndex = (ForwardLightData.NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE;
-				NumLocalReflectionCaptures = min(ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 0], ForwardLightData.NumReflectionCaptures);
-				DataStartIndex = ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 1];
-
-		#if (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
-			}
-			else
-			{
-				uint NumCulledEntryIndex = (ForwardLightDataISR.NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE;
-				NumLocalReflectionCaptures = min(ForwardLightDataISR.NumCulledLightsGrid[NumCulledEntryIndex + 0], ForwardLightDataISR.NumReflectionCaptures);
-				DataStartIndex = ForwardLightDataISR.NumCulledLightsGrid[NumCulledEntryIndex + 1];
-			}
-		#endif
+			uint NumCulledEntryIndex = (ForwardLightData.NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE;
+	#if (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
+			NumCulledEntryIndex += (EyeIndex == 0) ? 0 : ForwardLightData.CulledBufferOffsetISR;
+	#endif
+			NumLocalReflectionCaptures = min(ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 0], ForwardLightData.NumReflectionCaptures);
+			DataStartIndex = ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 1];
 #endif
-
+// END META SECTION - LightGrid Optimization
 		const bool bCompositeSkylight = true;
 		SpecularIBL = CompositeReflectionCapturesAndSkylightTWS(
 			1.0f, 

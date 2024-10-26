@@ -76,11 +76,21 @@ Texture2D EditorPrimitivesColor;
 Texture2D<float> EditorPrimitivesDepth;
 #endif
 
-Texture2D ColorTexture;
+// BEGIN META SECTION - Debug Primitive Multiview Rendering
+#if USE_MULTI_VIEW_ID_SV
+	Texture2DArray ColorTexture;
+#else
+	Texture2D ColorTexture;
+#endif
 SamplerState ColorSampler;
 
-Texture2D DepthTexture;
+#if USE_MULTI_VIEW_ID_SV
+	Texture2DArray DepthTexture;
+#else
+	Texture2D DepthTexture;
+#endif
 SamplerState DepthSampler;
+// END META SECTION - Debug Primitive Multiview Rendering
 
 Texture2D VelocityTexture;
 SamplerState VelocitySampler;
@@ -103,10 +113,37 @@ float4 SampleOffsetArray[MSAA_SAMPLE_COUNT];
 uint bOpaqueEditorGizmo;
 uint bCompositeAnyNonNullDepth;
 
+// BEGIN META SECTION - Debug Primitive Multiview Rendering
+float SampleDepthTexture(float2 UV, float ArrayIndex)
+{
+	#if USE_MULTI_VIEW_ID_SV
+		return Texture2DArraySample(DepthTexture, DepthSampler, float3(UV,ArrayIndex)).r;
+	#else
+		return Texture2DSampleLevel(DepthTexture, DepthSampler, UV, 0).r;
+	#endif
+}
+
+float4 SampleColorTexture(float2 UV, float ArrayIndex)
+{
+	#if USE_MULTI_VIEW_ID_SV
+		return Texture2DArraySample(ColorTexture, ColorSampler, float3(UV,ArrayIndex));
+	#else
+		return Texture2DSampleLevel(ColorTexture, ColorSampler, UV, 0);
+	#endif
+}
+
 void MainTemporalUpsampleDepthPS(
 	float4 SvPosition : SV_POSITION,
+	#if USE_MULTI_VIEW_ID_SV
+		in uint MultiViewId : SV_ViewID,
+	#endif
 	out float OutDeviceZ : SV_Target0)
 {
+	#if !USE_MULTI_VIEW_ID_SV
+		uint MultiViewId = 0;
+	#endif
+	// END META SECTION - Debug Primitive Multiview Rendering
+
 	float2 ViewportUV = (SvPosition.xy - History_ViewportMin) * History_ViewportSizeInverse;
 	float2 ScreenPos = ViewportUVToScreenPos(ViewportUV);
 	
@@ -121,8 +158,9 @@ void MainTemporalUpsampleDepthPS(
 	{
 		float2 SampleInputBufferUV = (Depth_ViewportMin + PPCk) * Depth_ExtentInverse;
 		SampleInputBufferUV = clamp(SampleInputBufferUV, Depth_UVViewportBilinearMin, Depth_UVViewportBilinearMax);
-			
-		InputDeviceZ = Texture2DSampleLevel(DepthTexture, DepthSampler, SampleInputBufferUV, 0).r;
+		// BEGIN META SECTION - Debug Primitive Multiview Rendering
+		InputDeviceZ = SampleDepthTexture(SampleInputBufferUV,MultiViewId);
+		// END META SECTION - Debug Primitive Multiview Rendering
 	}
 
 	// Compute the screen position to sample in history
@@ -223,7 +261,9 @@ void MainTemporalUpsampleDepthPS(
 			float2 SampleInputBufferUV = (Depth_ViewportMin + PPCk + PixelOffset) * Depth_ExtentInverse;
 			SampleInputBufferUV = clamp(SampleInputBufferUV, Depth_UVViewportBilinearMin, Depth_UVViewportBilinearMax);
 
-			float SampleDeviceZ = Texture2DSampleLevel(DepthTexture, DepthSampler, SampleInputBufferUV, 0).r;
+			// BEGIN META SECTION - Debug Primitive Multiview Rendering
+			float SampleDeviceZ = SampleDepthTexture(SampleInputBufferUV,MultiViewId);
+			// END META SECTION - Debug Primitive Multiview Rendering
 			
 			InputMinDeviceZ = min(InputMinDeviceZ, SampleDeviceZ);
 			InputMaxDeviceZ = max(InputMaxDeviceZ, SampleDeviceZ);
@@ -239,15 +279,24 @@ void MainTemporalUpsampleDepthPS(
 	OutDeviceZ = -min(-FinalHistoryDeviceZ, 0.0);
 }
 
+// BEGIN META SECTION - Debug Primitive Multiview Rendering
 void MainPopulateSceneDepthPS(
 	#if USE_MSAA && !COMPILER_HLSLCC
 		sample noperspective float4 SvPosition : SV_POSITION,
 	#else
 		noperspective float4 SvPosition : SV_POSITION,
 	#endif
+	#if USE_MULTI_VIEW_ID_SV
+		in uint MultiViewId : SV_ViewID,
+	#endif
 	out float4 OutColor : SV_Target0,
 	out float OutDepth : SV_DEPTH)
 {
+	#if !USE_MULTI_VIEW_ID_SV
+		uint MultiViewId = 0;
+	#endif
+	// END META SECTION - Debug Primitive Multiview Rendering
+
 	float2 ViewportUV = (SvPosition.xy - View.ViewRectMin.xy) * View.ViewSizeAndInvSize.zw;
 	
 	float2 DepthUV = clamp(
@@ -263,7 +312,9 @@ void MainPopulateSceneDepthPS(
 		(Color_ViewportMin + ViewportUV * Color_ViewportSize) * Color_ExtentInverse,
 		Color_UVViewportBilinearMin, Color_UVViewportBilinearMax);
 	ColorUV = clamp(ColorUV, float2(0, 0), float2(1, 1));
-	OutColor = Texture2DSampleLevel(ColorTexture, ColorSampler, ColorUV, 0).rgba;
+	// BEGIN META SECTION - Debug Primitive Multiview Rendering
+	OutColor = SampleColorTexture(ColorUV,MultiViewId);
+	// END META SECTION - Debug Primitive Multiview Rendering
 
 #if METAL_MSAA_HDR_DECODE
 	OutColor.rgb *= rcp(OutColor.r * (-0.299) + OutColor.g * (-0.587) + OutColor.b * (-0.114) + 1.0);
@@ -273,7 +324,9 @@ void MainPopulateSceneDepthPS(
 	OutColor = 0.0;
 #endif
 
-	OutDepth = Texture2DSampleLevel(DepthTexture, DepthSampler, DepthUV, 0).r;
+	// BEGIN META SECTION - Debug Primitive Multiview Rendering
+	OutDepth = SampleDepthTexture(DepthUV,MultiViewId);
+	// END META SECTION - Debug Primitive Multiview Rendering
 }
 
 float ComputeDepthMask(float SceneDeviceZ, float EditorDeviceZ)
@@ -299,16 +352,27 @@ void ResolveEditorPrimitiveColor(int2 PixelPos, out float4 OutColor, out float O
 	OutColor.rgb *= OutColor.a;
 }
 
+// BEGIN META SECTION - Debug Primitive Multiview Rendering
 void MainCompositeEditorPrimitivesPS(
 	float4 SvPosition : SV_POSITION,
+	#if USE_MULTI_VIEW_ID_SV
+		in uint MultiViewId : SV_ViewID,
+	#endif
 	out float4 OutColor : SV_Target0)
 {
+	#if !USE_MULTI_VIEW_ID_SV
+		uint MultiViewId = 0;
+	#endif
+	// END META SECTION - Debug Primitive Multiview Rendering
+
 	float2 ViewportUV = (SvPosition.xy - Output_ViewportMin) * Output_ViewportSizeInverse;
 	
 	const float2 ColorUV = (ViewportUV * Color_ViewportSize + Color_ViewportMin) * Color_ExtentInverse;
 	const int2 ColorPixelPos = int2(ColorUV * Color_Extent);
 	
-	float4 SceneColor = Texture2DSample(ColorTexture, ColorSampler, ColorUV);
+	// BEGIN META SECTION - Debug Primitive Multiview Rendering
+	float4 SceneColor = SampleColorTexture(ColorUV,MultiViewId);
+	// END META SECTION - Debug Primitive Multiview Rendering
 
 	// Resolve editor primitive scene color and depth.
 	float4 EditorPrimitiveColor;
@@ -327,7 +391,10 @@ void MainCompositeEditorPrimitivesPS(
 
 			float2 SampleDepthUV = (ViewportUV * Depth_ViewportSize + Depth_ViewportMin + SampleOffset - DepthTextureJitter) * Depth_ExtentInverse;
 			SampleDepthUV = clamp(SampleDepthUV, Depth_UVViewportBilinearMin, Depth_UVViewportBilinearMax);
-			float SampleSceneDeviceZ = Texture2DSampleLevel(DepthTexture, DepthSampler, SampleDepthUV, 0).r;
+
+			// BEGIN META SECTION - Debug Primitive Multiview Rendering
+			float SampleSceneDeviceZ = SampleDepthTexture(SampleDepthUV,MultiViewId);
+			// END META SECTION - Debug Primitive Multiview Rendering
 
 			float4 Sample = EditorPrimitivesColor.Load(ColorPixelPos, SampleIndex);
 			float SampleEditorDeviceZ = EditorPrimitivesDepth.Load(ColorPixelPos, SampleIndex).r;
@@ -363,7 +430,10 @@ void MainCompositeEditorPrimitivesPS(
 		float2 SampleDepthUV = (ViewportUV * Depth_ViewportSize + Depth_ViewportMin - DepthTextureJitter) * Depth_ExtentInverse;
 		SampleDepthUV = clamp(SampleDepthUV, Depth_UVViewportBilinearMin, Depth_UVViewportBilinearMax);
 
-		float SceneDeviceZ = Texture2DSampleLevel(DepthTexture, DepthSampler, SampleDepthUV, 0).r;
+		// BEGIN META SECTION - Debug Primitive Multiview Rendering
+		float SceneDeviceZ = SampleDepthTexture(SampleDepthUV,MultiViewId);
+		// END META SECTION - Debug Primitive Multiview Rendering
+
 		float EditorDeviceZ = EditorPrimitivesDepth.Load(int3(ColorPixelPos, 0)).r;
 		
 		EditorPrimitiveColor = EditorPrimitivesColor.Load(int3(ColorPixelPos, 0));

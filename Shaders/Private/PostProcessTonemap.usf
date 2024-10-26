@@ -28,9 +28,12 @@
 SCREEN_PASS_TEXTURE_VIEWPORT(Color)
 SCREEN_PASS_TEXTURE_VIEWPORT(Output)
 
+// BEGIN META SECTION - Multiview / Instanced Stereo
+#define USE_MULTI_VIEW (INSTANCED_STEREO || MOBILE_MULTI_VIEW)
+// END META SECTION - Multiview / Instanced Stereo
 #define MOBILE_MULTI_VIEW_FALLBACK (MOBILE_MULTI_VIEW && INSTANCED_STEREO)
 
-#if USE_MULTI_VIEW_ID_SV || MOBILE_MULTI_VIEW_FALLBACK
+#if USE_MULTI_VIEW
 Texture2DArray ColorTexture;
 #else
 Texture2D ColorTexture;
@@ -41,8 +44,15 @@ SamplerState ColorSampler;
 FScreenTransform ColorToBloom;
 float2 BloomUVViewportBilinearMin;
 float2 BloomUVViewportBilinearMax;
-Texture2D BloomTexture;
+
+// BEGIN META SECTION - Multiview / Instanced Stereo
+#if USE_MULTI_VIEW
+	Texture2DArray BloomTexture;
+#else
+	Texture2D BloomTexture;
+#endif
 SamplerState BloomSampler;
+// END META SECTION - Multiview / Instanced Stereo
 
 #if SUPPORTS_SCENE_COLOR_APPLY_PARAMETERS
 	StructuredBuffer<float4> SceneColorApplyParamaters;
@@ -242,10 +252,27 @@ void MainVS(
 	out noperspective 	float2 OutVignette				: TEXCOORD1,
 	out noperspective 	float4 OutGrainUV 				: TEXCOORD2,
 	out noperspective 	float2 OutScreenPos 			: TEXCOORD3,
-	out noperspective 	float2 OutFullViewUV 			: TEXCOORD4,
-	out 				float4 OutPosition 				: SV_POSITION
+	out noperspective 	float2 OutFullViewUV 			: TEXCOORD4
+	// BEGIN META SECTION - Multiview / Instanced Stereo
+	#if INSTANCED_STEREO
+		, uint InstanceId : SV_InstanceID
+		, out nointerpolation uint OutViewId : VIEW_ID
+		, out uint LayerIndex : SV_RenderTargetArrayIndex
+	#elif USE_MULTI_VIEW_ID_INTERPOLANT && MOBILE_MULTI_VIEW
+		, in uint InViewId : SV_ViewID
+		, out nointerpolation uint OutViewId : VIEW_ID
+	#endif
+	, out 				float4 OutPosition 				: SV_POSITION
 	)
 {
+	#if INSTANCED_STEREO
+		OutViewId = GetEyeIndex(InstanceId);
+		LayerIndex = OutViewId;
+	#elif USE_MULTI_VIEW_ID_INTERPOLANT
+		OutViewId = InViewId;
+	#endif
+	// END META SECTION - Multiview / Instanced Stereo
+
 	DrawRectangle(InPosition, InTexCoord, OutPosition, OutTexCoord);
     TonemapCommonVS(OutPosition, OutTexCoord, OutVignette, OutGrainUV, OutScreenPos, OutFullViewUV);
 }
@@ -258,7 +285,7 @@ float max4(float4 x)
 float4 SampleSceneColor(float2 SceneUV, float ArrayIndex)
 {
 	SceneUV = clamp(SceneUV, Color_UVViewportBilinearMin, Color_UVViewportBilinearMax);
-	#if USE_MULTI_VIEW_ID_SV || MOBILE_MULTI_VIEW_FALLBACK
+	#if USE_MULTI_VIEW
 	return Texture2DArraySample(ColorTexture, ColorSampler, float3(SceneUV.xy,ArrayIndex));
 	#else
 	return Texture2DSample(ColorTexture, ColorSampler, SceneUV);
@@ -347,7 +374,14 @@ float4 TonemapCommonPS(
 		}
 		#endif
 
-		float4 RawBloom = Texture2DSample(BloomTexture, BloomSampler, BloomUV);
+		// BEGIN META SECTION - Multiview / Instanced Stereo
+		float4 RawBloom;
+		#if USE_MULTI_VIEW
+			RawBloom = Texture2DArraySample(BloomTexture, BloomSampler, float3(BloomUV,ArrayIndex));
+		#else
+			RawBloom = Texture2DSample(BloomTexture, BloomSampler, BloomUV);
+		#endif
+		// END META SECTION - Multiview / Instanced Stereo
 
 		#if FEATURE_LEVEL == FEATURE_LEVEL_ES3_1
 		{
@@ -586,9 +620,13 @@ void MainPS(
 	in noperspective float4 GrainUV : TEXCOORD2,
 	in noperspective float2 ScreenPos : TEXCOORD3,
 	in noperspective float2 FullViewUV : TEXCOORD4,
-	#if USE_MULTI_VIEW_ID_SV
-	in uint MultiViewId : SV_ViewID,
+	// BEGIN META SECTION - Multiview / Instanced Stereo
+	#if INSTANCED_STEREO || USE_MULTI_VIEW_ID_INTERPOLANT
+		in nointerpolation uint InViewId : VIEW_ID,
+	#elif USE_MULTI_VIEW_ID_SV
+		in uint InViewId : SV_ViewID,
 	#endif
+	// END META SECTION - Multiview / Instanced Stereo
 	float4 SvPosition : SV_POSITION,		// after all interpolators
 	out float4 OutColor : SV_Target0
 #if OUTPUT_LUMINANCE
@@ -596,12 +634,14 @@ void MainPS(
 #endif
 	)
 {
-	float Luminance;
-	#if USE_MULTI_VIEW_ID_SV
-		float3 UVI = float3(UV.xy,MultiViewId);
-	#else
-		float3 UVI = float3(UV.xy,0);
+	// BEGIN META SECTION - Multiview / Instanced Stereo
+	#if !USE_MULTI_VIEW_ID_SV && !INSTANCED_STEREO && !USE_MULTI_VIEW_ID_INTERPOLANT
+		uint InViewId = 0;
 	#endif
+
+	float Luminance;
+	float3 UVI = float3(UV.xy,InViewId);
+	// END META SECTION - Multiview / Instanced Stereo
     OutColor = TonemapCommonPS(UVI, InVignette, GrainUV, ScreenPos, FullViewUV, SvPosition, Luminance);
 #if OUTPUT_LUMINANCE
 	OutLuminance = Luminance;
@@ -643,11 +683,11 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID)
 }
 #endif
 
-#ifdef SUBPASS_MSAA_SAMPLES
-	#if VULKAN_PROFILE
-		#include "/Engine/Public/Platform/Vulkan/VulkanSubpassSupport.ush"
-	#endif
-#endif
+// BEGIN META SECTION - Tonemap Subpass Depth Resolve
+#if VULKAN_PROFILE
+	#include "/Engine/Public/Platform/Vulkan/VulkanSubpassSupport.ush"
+ #endif
+// END META SECTION - Tonemap Subpass Depth Resolve
 
 half4 FetchAndResolveSceneColor(float2 UV, float ArrayIndex)
 {
@@ -684,6 +724,11 @@ void MobileCustomResolve_MainPS(
 #if USE_MULTI_VIEW_ID_SV
 	, in nointerpolation uint MultiViewId : SV_ViewID
 #endif
+// BEGIN META SECTION - Tonemap Subpass Depth Resolve
+	#if VULKAN_PROFILE
+	, out float OutDepth : SV_Depth
+	#endif
+// END META SECTION - Tonemap Subpass Depth Resolve
 )
 {
 	uint ArrayIndex = 0;
@@ -708,6 +753,12 @@ void MobileCustomResolve_MainPS(
 
 	OutColor.rgb = DeviceColor;
 	OutColor.a = 1.0;
+
+// BEGIN META SECTION - Tonemap Subpass Depth Resolve
+	#if VULKAN_PROFILE
+		OutDepth = VulkanSubpassDepthFetch();
+	#endif
+// END META SECTION - Tonemap Subpass Depth Resolve
 }
 
 
