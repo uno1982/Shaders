@@ -7,7 +7,7 @@
 #include "ACES.ush"
 #include "GammaCorrectionCommon.ush"
 
-/** Values of DIM_OUTPUT_DEVICE (matching C++'s EDisplayOutputFormat) */
+/** Values of output device (matching C++'s EDisplayOutputFormat) */
 #define TONEMAPPER_OUTPUT_sRGB 0
 #define TONEMAPPER_OUTPUT_Rec709 1
 #define TONEMAPPER_OUTPUT_ExplicitGammaMapping 2
@@ -19,7 +19,7 @@
 #define TONEMAPPER_OUTPUT_NoToneCurve 8
 #define TONEMAPPER_OUTPUT_WithToneCurve 9
 
-/** Values of DIM_OUTPUT_DEVICE (matching C++'s EDisplayColorGamut) */
+/** Values of output device (matching C++'s EDisplayColorGamut) */
 #define TONEMAPPER_GAMUT_sRGB_D65 0
 #define TONEMAPPER_GAMUT_DCIP3_D65 1
 #define TONEMAPPER_GAMUT_Rec2020_D65 2
@@ -230,9 +230,12 @@ half3 FilmToneMapInverse( half3 ToneColor )
 	// Pre desaturate
 	LinearColor = lerp( dot( LinearColor, AP1_RGB2Y ), LinearColor, 1.0 / 0.96 );
 
+#if WORKING_COLOR_SPACE_IS_SRGB
 	LinearColor = mul( AP1_2_sRGB, LinearColor );
-
-	// Returning positive sRGB values
+#else
+	LinearColor = mul( XYZ_TO_RGB_WORKING_COLOR_SPACE_MAT, mul( AP1_2_XYZ_MAT, LinearColor ) );
+#endif
+	// Returning positive working color space values
 	return max( 0, LinearColor );
 }
 

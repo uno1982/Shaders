@@ -35,7 +35,8 @@ SamplerState ElementTextureSampler;
 
 #if SAMPLE_VIRTUAL_TEXTURE
 Texture2D<uint4> InPageTableTexture;
-uint4 VTPackedPageTableUniform[2];
+uint4 VTPackedPageTableUniform0;
+uint4 VTPackedPageTableUniform1;
 uint4 VTPackedUniform;
 float4 VTShaderParams;
 #endif // SAMPLE_VIRTUAL_TEXTURE
@@ -164,33 +165,36 @@ half4 GetMaterialColor( VertexToPixelInterpolants InVertex, float2 MeshUV )
 	
 #if SUBSTRATE_ENABLED
 
-	// UI node forces a single unlit BSDF. We get the raw data from light function node from the raw BSDF on the tree.
+	// UI node forces a single unlit BSDF. We get the raw data from the Substrate UI node from the raw BSDF on the tree.
 	FSubstratePixelHeader SubstratePixelHeader = Parameters.GetFrontSubstrateHeader();
 	FSubstrateBSDF UnlitBSDF = SubstratePixelHeader.SubstrateTree.BSDFs[0];
 	UnlitBSDF.SubstrateSanitizeBSDF(); // required wehen not calling SubstrateUpdateTreeUnlit
 
+	float3 UnlitLuminance = BSDF_GETEMISSIVE(UnlitBSDF);
+	float3 UnlitTransmittance= UNLIT_TRANSMITTANCE(UnlitBSDF);
+	float UnlitGreyCoverage = 1.0 - UnlitTransmittance.x;
+
 #if ((SUBSTRATE_OPAQUE_DEFERRED || (SUBSTRATE_OPAQUE_MATERIAL && SUBSTRATE_FORWARD_SHADING)))
 
-	OutColor = half4(BSDF_GETEMISSIVE(UnlitBSDF), 1.0f);
+	OutColor = half4(UnlitLuminance, 1.0f);
 
 #else // SUBSTRATE_OPAQUE_DEFERRED
-
-	float3 Color = BSDF_GETEMISSIVE(UnlitBSDF);
-	float Coverage = saturate(1.0f - UNLIT_TRANSMITTANCE(UnlitBSDF).x);	// Unlit node transmittance is only generated from opacity
 
 #if MATERIALBLENDING_ALPHACOMPOSITE
 
 #if SUBSTRATE_USE_PREMULTALPHA_OVERRIDE // AlphaComposite - Premultiplied alpha blending
-	Coverage = GetMaterialOpacity(PixelMaterialInputs);
+	UnlitGreyCoverage = GetMaterialOpacity(PixelMaterialInputs);
 #endif
-	OutColor = half4(Color, Coverage);
+	OutColor = half4(UnlitLuminance, UnlitGreyCoverage);
 
 #elif MATERIALBLENDING_MODULATE
-	OutColor = half4(Color, 0.0f);
+	OutColor = half4(UnlitTransmittance, 0.0f);
 #elif MATERIALBLENDING_ALPHAHOLDOUT
-	OutColor = half4(0.0f, 0.0f, 0.0f, Coverage);
-#else // MATERIALBLENDING_ADDITIVE || MATERIALBLENDING_TRANSLUCENT
-	OutColor = half4(Color * Coverage, Coverage);
+	OutColor = half4(0.0f, 0.0f, 0.0f, UnlitGreyCoverage);
+#elif MATERIALBLENDING_ADDITIVE
+	OutColor = half4(UnlitLuminance, 1.0);
+#else // MATERIALBLENDING_TRANSLUCENT
+	OutColor = half4(UnlitLuminance, UnlitBSDF.Coverage);
 #endif // MATERIALBLENDING_xxx
 
 #endif// SUBSTRATE_OPAQUE_DEFERRED
@@ -218,7 +222,7 @@ half4 GetTextureColor( VertexToPixelInterpolants InVertex, float2 UV )
 	half4 BaseColor;
 
 	#if SAMPLE_VIRTUAL_TEXTURE
-			VTPageTableResult PageTableResult = TextureLoadVirtualPageTableLevel(InPageTableTexture, VTPageTableUniform_Unpack(VTPackedPageTableUniform[0], VTPackedPageTableUniform[1]), UV, VTADDRESSMODE_WRAP, VTADDRESSMODE_WRAP, VTShaderParams.x); 
+			VTPageTableResult PageTableResult = TextureLoadVirtualPageTableLevel(InPageTableTexture, VTPageTableUniform_Unpack(VTPackedPageTableUniform0, VTPackedPageTableUniform1), UV, VTADDRESSMODE_WRAP, VTADDRESSMODE_WRAP, VTShaderParams.x); 
 			BaseColor = TextureVirtualSampleLevel(ElementTexture, ElementTextureSampler, PageTableResult, (uint)VTShaderParams.y, VTUniform_Unpack(VTPackedUniform));
 	#else
 
@@ -374,6 +378,35 @@ half4 GetRoundedBoxElementColor( VertexToPixelInterpolants InVertex )
 #endif
 
 #if SHADER_TYPE == ST_LineSegment
+
+/**
+ * Computes 0-1 value that interpolates between dashes of length DashLength based on Distance with 1px of antialiasing between dashes and gaps
+ * 
+ * ie:
+ * 1 -----------------                     -----------------                     -----------------                     
+ *                    \                   /                 \                   /                 \                   /
+ * 0                   \_________________/                   \_________________/                   \_________________/ 
+ *
+ *   <  DashLength   >  <  DashLength   >  <  DashLength   >  <  DashLength   >  <  DashLength   >  <  DashLength   >
+ 
+ */
+float ModulateDashedLine(float Distance, float DashLength)
+{
+	// Add one for antialias pixel
+	DashLength += 1.f;
+
+	const float HalfDash  = 0.5f*DashLength;
+	const float Period    = 2.0f*DashLength;
+
+	// Offset the interpolation so that the dash starts at distance = 0;
+	const float Interp = Distance - HalfDash + 0.5f;
+	const float Mod = Interp - Period*floor(Interp/Period); // mod(Interp, Period)
+
+	// Compute the dash alpha using a clamped triangle wave
+	const float TriWave = 2.0f * abs(Mod - DashLength) - DashLength;
+	return clamp(TriWave, -1.0f, 1.0f)*0.5f + 0.5f;
+}
+
 /**
  * Generates an anti-aliased line segment pixel
  * This is based on the fast prefiltered lines technique published in GPU Gems 2
@@ -387,16 +420,21 @@ half4 GetRoundedBoxElementColor( VertexToPixelInterpolants InVertex )
 half4 GetLineSegmentElementColor( VertexToPixelInterpolants InVertex )
 {
 	const float2 Gradient = SLATE_UV0(InVertex);
+	const float2 DashParams = SLATE_UV1(InVertex);
 
 	// Get coverage based on distance from segment sides and ends
 	const float2 OutsideFilterUV = float2(1.0f, 1.0f);
 	const float2 InsideFilterUV = float2(ShaderParams.x, 0.0f);
 	const float2 LineCoverage = smoothstep(OutsideFilterUV, InsideFilterUV, abs(Gradient));
 
+	const float DashLength = DashParams.y;
+	const float DashAlpha = ModulateDashedLine(DashParams.x, DashParams.y);
+
 	half4 Color = InVertex.Color;
-	Color.a *= LineCoverage.x * LineCoverage.y;
+	Color.a *= LineCoverage.x * LineCoverage.y * DashAlpha;
 	return Color;
 }
+
 #endif
 
 HALF4_TYPE Main( VertexToPixelInterpolants VIn ) : SV_Target0

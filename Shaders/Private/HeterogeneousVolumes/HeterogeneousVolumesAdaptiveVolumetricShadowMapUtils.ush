@@ -113,7 +113,7 @@ uint2 AVSM_PackIndirectionData(FAVSMIndirectionData IndirectionData)
 	return PackedData;
 }
 
-FAVSMIndirectionData ASVM_UnpackIndirectionData(uint2 PackedData)
+FAVSMIndirectionData AVSM_UnpackIndirectionData(uint2 PackedData)
 {
 	FAVSMIndirectionData IndirectionData;
 	IndirectionData.PixelOffset = (PackedData.x >> 6) & AVSM_INVALID_PIXEL_OFFSET;
@@ -121,4 +121,15 @@ FAVSMIndirectionData ASVM_UnpackIndirectionData(uint2 PackedData)
 	IndirectionData.BeginX = f16tof32(PackedData.y >> 16);
 	IndirectionData.EndX = f16tof32(PackedData.y);
 	return IndirectionData;
+}
+
+int Align4(int Value)
+{
+	return (Value + 3) & ~3;
+}
+
+int CalcTopLevelSampleCount(int SampleCount)
+{
+	int TopLevelSampleCount = Align4(SampleCount) >> 2;
+	return TopLevelSampleCount;
 }

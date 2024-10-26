@@ -7,7 +7,7 @@
 #pragma once
 
 // Update this GUID to invalidate shader recompilation for only Metal shaders
-#pragma message("UESHADERMETADATA_VERSION E4FA73AD-5066-4067-8B47-814FDC0D6332")
+#pragma message("UESHADERMETADATA_VERSION 8C6A7A49-B8C0-4561-9D8B-1E0C755D93F7")
 
 #if VERTEXSHADER && HULLSHADER
 #ifndef TESSELLATIONSHADER
@@ -20,8 +20,6 @@
 
 #if METAL_SM6_PROFILE == 1
     #define PLATFORM_SUPPORTS_SM6_0_WAVE_OPERATIONS 1
-    // Disable WaveVote due to bugs
-    #define COMPILER_SUPPORTS_WAVE_VOTE 0
 #endif
 
 #if IS_BASE_PASS && COMPUTE_SHADED && !defined(USE_FORCE_TEXTURE_MIP)
@@ -89,6 +87,12 @@
         {
             InterlockedMax(Dest[Coord], Value);
         }
+
+		void ImageInterlockedAddUInt64(RWTexture2D<UlongType> Dest, uint2 Coord, UlongType Value)
+		{
+			InterlockedAdd(Dest[Coord], Value);
+		}
+
     #endif
     
     #if PLATFORM_SUPPORTS_BINDLESS
